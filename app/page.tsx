@@ -28,7 +28,6 @@ import {
   CalendarDays,
   Clock,
   Flame,
-  Home,
   Pause,
   Play,
   Plus,
@@ -144,23 +143,27 @@ function calcStreak(logs: StudyLog[]) {
   const dates = new Set(logs.map((l) => l.date));
   let streak = 0;
   const d = new Date();
+
   for (;;) {
     const key = d.toISOString().slice(0, 10);
     if (!dates.has(key)) break;
     streak += 1;
     d.setDate(d.getDate() - 1);
   }
+
   return streak;
 }
 
 function generateCalendarDays() {
   const today = new Date();
   const days = [];
+
   for (let i = 27; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(today.getDate() - i);
     days.push(d.toISOString().slice(0, 10));
   }
+
   return days;
 }
 
@@ -187,14 +190,23 @@ export default function Page() {
 
 function StudyApp() {
   const [activeTab, setActiveTab] = useState("dashboard");
+
   const [logs, setLogs] = useState<StudyLog[]>(() => loadState("study_logs", initialLogs));
   const [questions, setQuestions] = useState<QuestionLog[]>(() => loadState("study_questions", initialQuestions));
-  const [targetDate, setTargetDate] = useState<string>(() => loadState("target_exam_date", addDays(new Date().toISOString().slice(0, 10), 30)));
+  const [targetDate, setTargetDate] = useState<string>(() =>
+    loadState("target_exam_date", addDays(new Date().toISOString().slice(0, 10), 30))
+  );
   const [targetHours, setTargetHours] = useState<number>(() => loadState("target_hours", 80));
-  const [dailyTargetMinutes, setDailyTargetMinutes] = useState<number>(() => loadState("daily_target_minutes", 120));
+  const [dailyTargetMinutes, setDailyTargetMinutes] = useState<number>(() =>
+    loadState("daily_target_minutes", 120)
+  );
 
-  const [timerSeconds, setTimerSeconds] = useState<number>(() => loadState("timer_seconds", 0));
   const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const [timerStartedAt, setTimerStartedAt] = useState<number | null>(null);
+  const [baseTimerSeconds, setBaseTimerSeconds] = useState<number>(() => loadState("timer_seconds", 0));
+  const [displayTimerSeconds, setDisplayTimerSeconds] = useState<number>(() => loadState("timer_seconds", 0));
+
+  const timerSeconds = displayTimerSeconds;
 
   const [logForm, setLogForm] = useState({
     date: new Date().toISOString().slice(0, 10),
@@ -204,6 +216,7 @@ function StudyApp() {
     understanding: 70,
     memo: "",
   });
+
   const [editingLogId, setEditingLogId] = useState<string | null>(null);
 
   const [questionForm, setQuestionForm] = useState({
@@ -219,24 +232,57 @@ function StudyApp() {
   useEffect(() => saveState("study_questions", questions), [questions]);
   useEffect(() => saveState("target_exam_date", targetDate), [targetDate]);
   useEffect(() => saveState("target_hours", targetHours), [targetHours]);
-  useEffect(() => saveState("timer_seconds", timerSeconds), [timerSeconds]);
   useEffect(() => saveState("daily_target_minutes", dailyTargetMinutes), [dailyTargetMinutes]);
+  useEffect(() => saveState("timer_seconds", displayTimerSeconds), [displayTimerSeconds]);
 
   useEffect(() => {
-    if (!isTimerRunning) return;
+    if (!isTimerRunning || timerStartedAt === null) return;
+
     const id = window.setInterval(() => {
-      setTimerSeconds((prev) => prev + 1);
+      const elapsed = Math.floor((Date.now() - timerStartedAt) / 1000);
+      setDisplayTimerSeconds(baseTimerSeconds + elapsed);
     }, 1000);
+
     return () => window.clearInterval(id);
-  }, [isTimerRunning]);
+  }, [isTimerRunning, timerStartedAt, baseTimerSeconds]);
+
+  const startTimer = () => {
+    setBaseTimerSeconds(timerSeconds);
+    setTimerStartedAt(Date.now());
+    setIsTimerRunning(true);
+  };
+
+  const stopTimer = () => {
+    if (timerStartedAt !== null) {
+      const elapsed = Math.floor((Date.now() - timerStartedAt) / 1000);
+      const newTime = baseTimerSeconds + elapsed;
+      setDisplayTimerSeconds(newTime);
+      setBaseTimerSeconds(newTime);
+    }
+
+    setIsTimerRunning(false);
+    setTimerStartedAt(null);
+  };
+
+  const resetTimer = () => {
+    setDisplayTimerSeconds(0);
+    setBaseTimerSeconds(0);
+    setTimerStartedAt(null);
+    setIsTimerRunning(false);
+  };
 
   const today = new Date().toISOString().slice(0, 10);
 
-  const totalMinutes = useMemo(() => logs.reduce((sum, log) => sum + Number(log.minutes || 0), 0), [logs]);
+  const totalMinutes = useMemo(
+    () => logs.reduce((sum, log) => sum + Number(log.minutes || 0), 0),
+    [logs]
+  );
+
   const totalHours = Math.round((totalMinutes / 60) * 10) / 10;
   const remainingHours = Math.max(0, Math.round((targetHours - totalHours) * 10) / 10);
   const remainingDays = Math.max(0, daysBetween(today, targetDate));
   const requiredMinutesPerDay = remainingDays > 0 ? Math.ceil((remainingHours * 60) / remainingDays) : 0;
+
   const streak = useMemo(() => calcStreak(logs), [logs]);
 
   const todayMinutes = useMemo(
@@ -256,12 +302,18 @@ function StudyApp() {
     return CATEGORIES.map((category) => {
       const categoryLogs = logs.filter((l) => l.category === category);
       const minutes = categoryLogs.reduce((sum, log) => sum + Number(log.minutes || 0), 0);
+
       const avgUnderstanding = categoryLogs.length
-        ? Math.round(categoryLogs.reduce((sum, log) => sum + Number(log.understanding || 0), 0) / categoryLogs.length)
+        ? Math.round(
+            categoryLogs.reduce((sum, log) => sum + Number(log.understanding || 0), 0) /
+              categoryLogs.length
+          )
         : 0;
+
       const categoryQuestions = questions.filter((q) => q.category === category);
       const wrong = categoryQuestions.filter((q) => !q.isCorrect).length;
       const score = Math.max(0, Math.min(100, avgUnderstanding - wrong * 8));
+
       return { category, minutes, understanding: avgUnderstanding, wrong, score };
     });
   }, [logs, questions]);
@@ -275,19 +327,28 @@ function StudyApp() {
 
   const dailyData = useMemo(() => {
     const map = new Map<string, number>();
+
     logs.forEach((log) => {
       map.set(log.date, (map.get(log.date) || 0) + Number(log.minutes || 0));
     });
-    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, minutes]) => ({ date: date.slice(5), minutes }));
+
+    return [...map.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, minutes]) => ({ date: date.slice(5), minutes }));
   }, [logs]);
 
   const reviewQuestions = useMemo(() => {
-    return questions.filter((q) => !q.isCorrect && q.reviewDate <= today).sort((a, b) => a.reviewDate.localeCompare(b.reviewDate));
+    return questions
+      .filter((q) => !q.isCorrect && q.reviewDate <= today)
+      .sort((a, b) => a.reviewDate.localeCompare(b.reviewDate));
   }, [questions, today]);
 
   const calendarDays = useMemo(() => generateCalendarDays(), []);
   const studyDateSet = useMemo(() => new Set(logs.map((l) => l.date)), [logs]);
-  const reviewDateSet = useMemo(() => new Set(questions.filter((q) => !q.isCorrect).map((q) => q.reviewDate)), [questions]);
+  const reviewDateSet = useMemo(
+    () => new Set(questions.filter((q) => !q.isCorrect).map((q) => q.reviewDate)),
+    [questions]
+  );
 
   const recommendation = useMemo(() => {
     if (!weakCategories.length) return "まずは1件、学習記録か問題演習ログを登録しましょう。";
@@ -297,10 +358,14 @@ function StudyApp() {
 
   const localAdvice = useMemo(() => {
     const top = weakCategories[0];
-    const wrongReason = questions.filter((q) => !q.isCorrect).reduce<Record<string, number>>((acc, q) => {
-      acc[q.mistakeReason] = (acc[q.mistakeReason] || 0) + 1;
-      return acc;
-    }, {});
+
+    const wrongReason = questions
+      .filter((q) => !q.isCorrect)
+      .reduce<Record<string, number>>((acc, q) => {
+        acc[q.mistakeReason] = (acc[q.mistakeReason] || 0) + 1;
+        return acc;
+      }, {});
+
     const worstReason = Object.entries(wrongReason).sort((a, b) => b[1] - a[1])[0]?.[0] || "データ不足";
 
     return [
@@ -314,12 +379,36 @@ function StudyApp() {
 
   const localQuestion = useMemo(() => {
     const category = weakCategories[0]?.category || "Network";
-    return `【${category}：復習問題】\n\nある企業は、複数アカウント・複数VPC環境でAWSを利用しています。運用チームは、接続構成をシンプルにしつつ、将来的なVPC追加にも耐えられる構成にしたいと考えています。さらに、オンプレミス環境との安定した接続も必要です。\n\n最も適切な選択肢はどれですか？\n\nA. すべてのVPCをVPCピアリングでフルメッシュ接続する\nB. Transit GatewayでVPC接続を集約し、オンプレミスとはDirect Connectを利用する\nC. すべての通信をNAT Gateway経由にする\nD. 各VPCに個別のInternet Gatewayを追加する\n\n正解：B\n\n解説：大規模なVPC間接続はTransit Gatewayでハブアンドスポーク化するのが適切です。オンプレミス接続の帯域・安定性要件にはDirect Connectが向いています。Aは管理が複雑、C/Dは要件を満たしません。`;
+
+    return `【${category}：復習問題】
+
+ある企業は、複数アカウント・複数VPC環境でAWSを利用しています。運用チームは、接続構成をシンプルにしつつ、将来的なVPC追加にも耐えられる構成にしたいと考えています。さらに、オンプレミス環境との安定した接続も必要です。
+
+最も適切な選択肢はどれですか？
+
+A. すべてのVPCをVPCピアリングでフルメッシュ接続する
+B. Transit GatewayでVPC接続を集約し、オンプレミスとはDirect Connectを利用する
+C. すべての通信をNAT Gateway経由にする
+D. 各VPCに個別のInternet Gatewayを追加する
+
+正解：B
+
+解説：大規模なVPC間接続はTransit Gatewayでハブアンドスポーク化するのが適切です。オンプレミス接続の帯域・安定性要件にはDirect Connectが向いています。Aは管理が複雑、C/Dは要件を満たしません。`;
   }, [weakCategories]);
 
   const addLog = () => {
     if (!logForm.material.trim()) return alert("教材名を入力してください");
-    setLogs([{ id: crypto.randomUUID(), ...logForm, minutes: Number(logForm.minutes), understanding: Number(logForm.understanding) }, ...logs]);
+
+    setLogs([
+      {
+        id: crypto.randomUUID(),
+        ...logForm,
+        minutes: Number(logForm.minutes),
+        understanding: Number(logForm.understanding),
+      },
+      ...logs,
+    ]);
+
     setLogForm({ ...logForm, material: "", memo: "" });
   };
 
@@ -339,12 +428,20 @@ function StudyApp() {
   const saveLogEdit = () => {
     if (!editingLogId) return;
     if (!logForm.material.trim()) return alert("教材名を入力してください");
-    setLogs(logs.map((log) => log.id === editingLogId ? {
-      ...log,
-      ...logForm,
-      minutes: Number(logForm.minutes),
-      understanding: Number(logForm.understanding),
-    } : log));
+
+    setLogs(
+      logs.map((log) =>
+        log.id === editingLogId
+          ? {
+              ...log,
+              ...logForm,
+              minutes: Number(logForm.minutes),
+              understanding: Number(logForm.understanding),
+            }
+          : log
+      )
+    );
+
     setEditingLogId(null);
     setLogForm({ ...logForm, material: "", memo: "", minutes: 60, understanding: 70 });
   };
@@ -368,16 +465,29 @@ function StudyApp() {
 
   const addTimerLog = () => {
     const minutes = Math.max(1, Math.round(timerSeconds / 60));
+
     if (!logForm.material.trim()) return alert("教材名を入力してください");
-    setLogs([{ id: crypto.randomUUID(), ...logForm, minutes, understanding: Number(logForm.understanding), memo: `${logForm.memo}${logForm.memo ? "\n" : ""}タイマー記録：${formatSeconds(timerSeconds)}` }, ...logs]);
-    setTimerSeconds(0);
-    setIsTimerRunning(false);
+
+    setLogs([
+      {
+        id: crypto.randomUUID(),
+        ...logForm,
+        minutes,
+        understanding: Number(logForm.understanding),
+        memo: `${logForm.memo}${logForm.memo ? "\n" : ""}タイマー記録：${formatSeconds(timerSeconds)}`,
+      },
+      ...logs,
+    ]);
+
+    resetTimer();
     setLogForm({ ...logForm, material: "", memo: "", minutes: 60 });
   };
 
   const addQuestion = () => {
     if (!questionForm.title.trim()) return alert("問題タイトルを入力してください");
+
     const reviewDate = questionForm.isCorrect ? addDays(questionForm.date, 7) : addDays(questionForm.date, 1);
+
     setQuestions([{ id: crypto.randomUUID(), ...questionForm, reviewDate }, ...questions]);
     setQuestionForm({ ...questionForm, title: "", memo: "", isCorrect: false });
   };
@@ -386,7 +496,17 @@ function StudyApp() {
   const removeQuestion = (id: string) => setQuestions(questions.filter((q) => q.id !== id));
 
   const markReviewed = (id: string) => {
-    setQuestions(questions.map((q) => q.id === id ? { ...q, reviewDate: addDays(today, 3), memo: `${q.memo}\n復習済み：${today}`.trim() } : q));
+    setQuestions(
+      questions.map((q) =>
+        q.id === id
+          ? {
+              ...q,
+              reviewDate: addDays(today, 3),
+              memo: `${q.memo}\n復習済み：${today}`.trim(),
+            }
+          : q
+      )
+    );
   };
 
   const tabTitle: Record<string, string> = {
@@ -405,7 +525,9 @@ function StudyApp() {
             <Rocket className="h-5 w-5" />
           </div>
           <div>
-            <p className="text-xl font-bold tracking-tight">StudyPlus<span className="text-violet-400">+</span></p>
+            <p className="text-xl font-bold tracking-tight">
+              StudyPlus<span className="text-violet-400">+</span>
+            </p>
             <p className="text-xs text-slate-400">AWS SAP Dashboard</p>
           </div>
         </div>
@@ -420,9 +542,14 @@ function StudyApp() {
 
         <div className="mt-8 rounded-3xl border border-white/10 bg-white/5 p-4">
           <p className="text-xs text-slate-400">今日の進捗</p>
-          <p className="mt-1 text-2xl font-black">{todayMinutes}分 / {dailyTargetMinutes}分</p>
+          <p className="mt-1 text-2xl font-black">
+            {todayMinutes}分 / {dailyTargetMinutes}分
+          </p>
           <div className="mt-3 h-3 rounded-full bg-white/10">
-            <div className="h-3 rounded-full bg-gradient-to-r from-violet-500 to-cyan-400" style={{ width: `${todayProgress}%` }} />
+            <div
+              className="h-3 rounded-full bg-gradient-to-r from-violet-500 to-cyan-400"
+              style={{ width: `${todayProgress}%` }}
+            />
           </div>
           <p className="mt-2 text-xs text-slate-400">{todayProgress}% 達成</p>
         </div>
@@ -446,7 +573,10 @@ function StudyApp() {
             </div>
             <h2 className="max-w-3xl text-4xl font-black leading-tight tracking-tight md:text-5xl">
               合格までの不足分を
-              <span className="bg-gradient-to-r from-violet-400 via-fuchsia-400 to-cyan-300 bg-clip-text text-transparent"> 見える化 </span>
+              <span className="bg-gradient-to-r from-violet-400 via-fuchsia-400 to-cyan-300 bg-clip-text text-transparent">
+                {" "}
+                見える化{" "}
+              </span>
               する学習アプリ
             </h2>
             <p className="mt-4 max-w-2xl text-slate-300">
@@ -514,7 +644,10 @@ function StudyApp() {
           <TabsContent value="plan" className="grid gap-5 lg:grid-cols-[420px_1fr]">
             <GlassCard>
               <div className="space-y-3">
-                <h2 className="flex items-center gap-2 text-xl font-bold"><CalendarDays className="h-5 w-5" />試験日から逆算</h2>
+                <h2 className="flex items-center gap-2 text-xl font-bold">
+                  <CalendarDays className="h-5 w-5" />
+                  試験日から逆算
+                </h2>
                 <label className="text-sm text-slate-400">試験日</label>
                 <Input className={inputClass} type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} />
                 <label className="text-sm text-slate-400">目標学習時間</label>
@@ -522,9 +655,15 @@ function StudyApp() {
                 <label className="text-sm text-slate-400">1日の目標学習時間（分）</label>
                 <Input className={inputClass} type="number" value={dailyTargetMinutes} onChange={(e) => setDailyTargetMinutes(Number(e.target.value))} />
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-7 text-slate-300">
-                  <p>残り日数：<span className="font-bold text-white">{remainingDays}日</span></p>
-                  <p>残り学習：<span className="font-bold text-white">{remainingHours}時間</span></p>
-                  <p>必要ペース：<span className="font-bold text-cyan-300">1日 {requiredMinutesPerDay}分</span></p>
+                  <p>
+                    残り日数：<span className="font-bold text-white">{remainingDays}日</span>
+                  </p>
+                  <p>
+                    残り学習：<span className="font-bold text-white">{remainingHours}時間</span>
+                  </p>
+                  <p>
+                    必要ペース：<span className="font-bold text-cyan-300">1日 {requiredMinutesPerDay}分</span>
+                  </p>
                 </div>
               </div>
             </GlassCard>
@@ -535,8 +674,18 @@ function StudyApp() {
                 {calendarDays.map((day) => {
                   const studied = studyDateSet.has(day);
                   const review = reviewDateSet.has(day);
+
                   return (
-                    <div key={day} className={`rounded-2xl border p-3 text-center text-xs ${studied ? "border-emerald-400/40 bg-emerald-400/20 text-emerald-100" : review ? "border-amber-400/40 bg-amber-400/20 text-amber-100" : "border-white/10 bg-white/5 text-slate-400"}`}>
+                    <div
+                      key={day}
+                      className={`rounded-2xl border p-3 text-center text-xs ${
+                        studied
+                          ? "border-emerald-400/40 bg-emerald-400/20 text-emerald-100"
+                          : review
+                            ? "border-amber-400/40 bg-amber-400/20 text-amber-100"
+                            : "border-white/10 bg-white/5 text-slate-400"
+                      }`}
+                    >
                       <p>{day.slice(5)}</p>
                       <p className="mt-1 text-lg">{studied ? "🔥" : review ? "🔁" : "・"}</p>
                     </div>
@@ -547,12 +696,18 @@ function StudyApp() {
             </GlassCard>
 
             <GlassCard className="lg:col-span-2">
-              <h2 className="mb-3 flex items-center gap-2 text-xl font-bold"><Sparkles className="h-5 w-5 text-cyan-300" />ローカル弱点アドバイス</h2>
+              <h2 className="mb-3 flex items-center gap-2 text-xl font-bold">
+                <Sparkles className="h-5 w-5 text-cyan-300" />
+                ローカル弱点アドバイス
+              </h2>
               <p className="whitespace-pre-wrap text-sm leading-7 text-slate-300">{localAdvice}</p>
             </GlassCard>
 
             <GlassCard className="lg:col-span-2">
-              <h2 className="mb-3 flex items-center gap-2 text-xl font-bold"><Brain className="h-5 w-5 text-fuchsia-300" />ローカル問題生成</h2>
+              <h2 className="mb-3 flex items-center gap-2 text-xl font-bold">
+                <Brain className="h-5 w-5 text-fuchsia-300" />
+                ローカル問題生成
+              </h2>
               <p className="whitespace-pre-wrap text-sm leading-7 text-slate-300">{localQuestion}</p>
             </GlassCard>
           </TabsContent>
@@ -560,17 +715,35 @@ function StudyApp() {
           <TabsContent value="log" className="grid gap-5 lg:grid-cols-[420px_1fr]">
             <GlassCard>
               <div className="space-y-4">
-                <h2 className="flex items-center gap-2 text-xl font-bold"><Timer className="h-5 w-5" />学習タイマー</h2>
+                <h2 className="flex items-center gap-2 text-xl font-bold">
+                  <Timer className="h-5 w-5" />
+                  学習タイマー
+                </h2>
                 <div className="rounded-3xl border border-white/10 bg-black/20 p-6 text-center">
-                  <p className="font-mono text-5xl font-black tracking-widest text-cyan-200">{formatSeconds(timerSeconds)}</p>
-                  <p className="mt-2 text-sm text-slate-400">タイマーで測った時間をそのまま学習記録にできます</p>
+                  <p className="font-mono text-5xl font-black tracking-widest text-cyan-200">
+                    {formatSeconds(timerSeconds)}
+                  </p>
+                  <p className="mt-2 text-sm text-slate-400">
+                    タイマーで測った時間をそのまま学習記録にできます
+                  </p>
                 </div>
                 <div className="grid grid-cols-3 gap-3">
-                  <Button className="rounded-2xl bg-emerald-500 hover:bg-emerald-600" onClick={() => setIsTimerRunning(true)} disabled={isTimerRunning}><Play className="mr-2 h-4 w-4" />開始</Button>
-                  <Button className="rounded-2xl bg-amber-500 hover:bg-amber-600" onClick={() => setIsTimerRunning(false)} disabled={!isTimerRunning}><Pause className="mr-2 h-4 w-4" />停止</Button>
-                  <Button className="rounded-2xl bg-white/10 hover:bg-white/20" onClick={() => { setIsTimerRunning(false); setTimerSeconds(0); }}><RotateCcw className="mr-2 h-4 w-4" />リセット</Button>
+                  <Button className="rounded-2xl bg-emerald-500 hover:bg-emerald-600" onClick={startTimer} disabled={isTimerRunning}>
+                    <Play className="mr-2 h-4 w-4" />
+                    開始
+                  </Button>
+                  <Button className="rounded-2xl bg-amber-500 hover:bg-amber-600" onClick={stopTimer} disabled={!isTimerRunning}>
+                    <Pause className="mr-2 h-4 w-4" />
+                    停止
+                  </Button>
+                  <Button className="rounded-2xl bg-white/10 hover:bg-white/20" onClick={resetTimer}>
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    リセット
+                  </Button>
                 </div>
-                <Button className="w-full rounded-2xl bg-gradient-to-r from-violet-500 to-cyan-500" onClick={applyTimerToLog}>タイマー時間を下の記録に反映</Button>
+                <Button className="w-full rounded-2xl bg-gradient-to-r from-violet-500 to-cyan-500" onClick={applyTimerToLog}>
+                  タイマー時間を下の記録に反映
+                </Button>
               </div>
             </GlassCard>
 
@@ -591,22 +764,24 @@ function StudyApp() {
                   </div>
                 </div>
                 <Textarea className={inputClass} placeholder="メモ" value={logForm.memo} onChange={(e) => setLogForm({ ...logForm, memo: e.target.value })} />
+
                 <div className="grid grid-cols-2 gap-3">
                   <Button className="rounded-2xl bg-gradient-to-r from-violet-500 to-cyan-500" onClick={editingLogId ? saveLogEdit : addLog}>
-                    <Plus className="mr-2 h-4 w-4" />{editingLogId ? "編集を保存" : "手入力で追加"}
+                    <Plus className="mr-2 h-4 w-4" />
+                    {editingLogId ? "編集を保存" : "手入力で追加"}
                   </Button>
                   <Button className="rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400" onClick={addTimerLog} disabled={!!editingLogId}>
-                    <Timer className="mr-2 h-4 w-4" />タイマーで追加
+                    <Timer className="mr-2 h-4 w-4" />
+                    タイマーで追加
                   </Button>
                 </div>
+
                 {editingLogId && (
                   <Button variant="outline" className="w-full rounded-2xl border-white/20 bg-white/5 text-white hover:bg-white/10" onClick={cancelLogEdit}>
                     編集をキャンセル
                   </Button>
                 )}
-                
-                </div>
-              
+              </div>
             </GlassCard>
 
             <div className="lg:col-span-2">
@@ -622,15 +797,31 @@ function StudyApp() {
                 <CategorySelect value={questionForm.category} onChange={(v) => setQuestionForm({ ...questionForm, category: v })} />
                 <Input className={inputClass} placeholder="問題タイトル / 論点" value={questionForm.title} onChange={(e) => setQuestionForm({ ...questionForm, title: e.target.value })} />
                 <Select value={questionForm.isCorrect ? "true" : "false"} onValueChange={(v) => setQuestionForm({ ...questionForm, isCorrect: v === "true" })}>
-                  <SelectTrigger className={inputClass}><SelectValue /></SelectTrigger>
-                  <SelectContent><SelectItem value="true">正解</SelectItem><SelectItem value="false">不正解</SelectItem></SelectContent>
+                  <SelectTrigger className={inputClass}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="true">正解</SelectItem>
+                    <SelectItem value="false">不正解</SelectItem>
+                  </SelectContent>
                 </Select>
                 <Select value={questionForm.mistakeReason} onValueChange={(v) => setQuestionForm({ ...questionForm, mistakeReason: v })}>
-                  <SelectTrigger className={inputClass}><SelectValue /></SelectTrigger>
-                  <SelectContent>{MISTAKE_REASONS.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
+                  <SelectTrigger className={inputClass}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MISTAKE_REASONS.map((r) => (
+                      <SelectItem key={r} value={r}>
+                        {r}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
                 <Textarea className={inputClass} placeholder="解説メモ / なぜ間違えたか" value={questionForm.memo} onChange={(e) => setQuestionForm({ ...questionForm, memo: e.target.value })} />
-                <Button className="w-full rounded-2xl bg-gradient-to-r from-violet-500 to-cyan-500" onClick={addQuestion}><Brain className="mr-2 h-4 w-4" />追加</Button>
+                <Button className="w-full rounded-2xl bg-gradient-to-r from-violet-500 to-cyan-500" onClick={addQuestion}>
+                  <Brain className="mr-2 h-4 w-4" />
+                  追加
+                </Button>
               </div>
             </GlassCard>
             <ListCard title="問題演習ログ" items={questions} type="question" onDelete={removeQuestion} />
@@ -646,10 +837,14 @@ function StudyApp() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="font-bold">{q.title}</p>
-                        <p className="text-sm text-slate-400">{q.category} / {q.mistakeReason} / 復習日: {q.reviewDate}</p>
+                        <p className="text-sm text-slate-400">
+                          {q.category} / {q.mistakeReason} / 復習日: {q.reviewDate}
+                        </p>
                         <p className="mt-2 whitespace-pre-wrap text-sm text-slate-300">{q.memo}</p>
                       </div>
-                      <Button variant="outline" className="rounded-2xl border-white/20 bg-white/5 text-white hover:bg-white/10" onClick={() => markReviewed(q.id)}>復習済み</Button>
+                      <Button variant="outline" className="rounded-2xl border-white/20 bg-white/5 text-white hover:bg-white/10" onClick={() => markReviewed(q.id)}>
+                        復習済み
+                      </Button>
                     </div>
                   </div>
                 ))}
@@ -662,11 +857,25 @@ function StudyApp() {
   );
 }
 
-function SideNavItem({ active, icon, label, onClick }: { active: boolean; icon: string; label: string; onClick: () => void }) {
+function SideNavItem({
+  active,
+  icon,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  icon: string;
+  label: string;
+  onClick: () => void;
+}) {
   return (
     <button
       onClick={onClick}
-      className={`w-full rounded-2xl px-4 py-3 text-left text-sm font-bold transition ${active ? "bg-gradient-to-r from-violet-500 to-cyan-500 text-white shadow-lg shadow-violet-500/20" : "text-slate-300 hover:bg-white/10"}`}
+      className={`w-full rounded-2xl px-4 py-3 text-left text-sm font-bold transition ${
+        active
+          ? "bg-gradient-to-r from-violet-500 to-cyan-500 text-white shadow-lg shadow-violet-500/20"
+          : "text-slate-300 hover:bg-white/10"
+      }`}
     >
       <span className="mr-2">{icon}</span>
       {label}
@@ -674,7 +883,13 @@ function SideNavItem({ active, icon, label, onClick }: { active: boolean; icon: 
   );
 }
 
-function GlassCard({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+function GlassCard({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
     <Card className={`rounded-3xl border border-white/10 bg-white/[0.06] text-slate-100 shadow-2xl shadow-black/20 backdrop-blur-xl ${className}`}>
       <CardContent className="p-6">{children}</CardContent>
@@ -682,7 +897,13 @@ function GlassCard({ children, className = "" }: { children: React.ReactNode; cl
   );
 }
 
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
+function ChartCard({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <GlassCard>
       <h2 className="mb-4 text-xl font-bold">{title}</h2>
@@ -691,7 +912,17 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
   );
 }
 
-function MetricCard({ Icon, label, value, accent }: { Icon: React.ElementType; label: string; value: string; accent: string }) {
+function MetricCard({
+  Icon,
+  label,
+  value,
+  accent,
+}: {
+  Icon: React.ElementType;
+  label: string;
+  value: string;
+  accent: string;
+}) {
   return (
     <GlassCard>
       <div className="flex items-center gap-4">
@@ -707,16 +938,42 @@ function MetricCard({ Icon, label, value, accent }: { Icon: React.ElementType; l
   );
 }
 
-function CategorySelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+function CategorySelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className={inputClass}><SelectValue /></SelectTrigger>
-      <SelectContent>{CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+      <SelectTrigger className={inputClass}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {CATEGORIES.map((c) => (
+          <SelectItem key={c} value={c}>
+            {c}
+          </SelectItem>
+        ))}
+      </SelectContent>
     </Select>
   );
 }
 
-function ListCard({ title, items, type, onDelete, onEdit }: { title: string; items: Array<StudyLog | QuestionLog>; type: "log" | "question"; onDelete: (id: string) => void; onEdit?: (log: StudyLog) => void }) {
+function ListCard({
+  title,
+  items,
+  type,
+  onDelete,
+  onEdit,
+}: {
+  title: string;
+  items: Array<StudyLog | QuestionLog>;
+  type: "log" | "question";
+  onDelete: (id: string) => void;
+  onEdit?: (log: StudyLog) => void;
+}) {
   return (
     <GlassCard>
       <h2 className="text-xl font-bold">{title}</h2>
@@ -726,21 +983,37 @@ function ListCard({ title, items, type, onDelete, onEdit }: { title: string; ite
           <div key={item.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="font-bold">{type === "log" ? (item as StudyLog).material : (item as QuestionLog).title}</p>
+                <p className="font-bold">
+                  {type === "log" ? (item as StudyLog).material : (item as QuestionLog).title}
+                </p>
                 <p className="text-sm text-slate-400">
                   {item.date} / {item.category}
-                  {type === "log" ? ` / ${(item as StudyLog).minutes}分 / 理解度${(item as StudyLog).understanding}%` : ` / ${(item as QuestionLog).isCorrect ? "正解" : "不正解"} / ${(item as QuestionLog).mistakeReason}`}
+                  {type === "log"
+                    ? ` / ${(item as StudyLog).minutes}分 / 理解度${(item as StudyLog).understanding}%`
+                    : ` / ${(item as QuestionLog).isCorrect ? "正解" : "不正解"} / ${(item as QuestionLog).mistakeReason}`}
                 </p>
-                {type === "question" && <p className="text-sm text-slate-400">復習日: {(item as QuestionLog).reviewDate}</p>}
+                {type === "question" && (
+                  <p className="text-sm text-slate-400">復習日: {(item as QuestionLog).reviewDate}</p>
+                )}
                 <p className="mt-2 whitespace-pre-wrap text-sm text-slate-300">{item.memo}</p>
               </div>
               <div className="flex shrink-0 gap-2">
                 {type === "log" && onEdit && (
-                  <Button variant="outline" size="sm" className="rounded-xl border-white/20 bg-white/5 text-white hover:bg-white/10" onClick={() => onEdit(item as StudyLog)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl border-white/20 bg-white/5 text-white hover:bg-white/10"
+                    onClick={() => onEdit(item as StudyLog)}
+                  >
                     編集
                   </Button>
                 )}
-                <Button variant="ghost" size="icon" className="text-slate-300 hover:bg-white/10 hover:text-white" onClick={() => onDelete(item.id)}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-slate-300 hover:bg-white/10 hover:text-white"
+                  onClick={() => onDelete(item.id)}
+                >
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
