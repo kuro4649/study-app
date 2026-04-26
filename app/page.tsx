@@ -604,9 +604,9 @@ function StudyApp() {
                     編集をキャンセル
                   </Button>
                 )}
-                <div className="hidden"
+                
                 </div>
-              </div>
+              
             </GlassCard>
 
             <div className="lg:col-span-2">
