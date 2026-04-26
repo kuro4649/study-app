@@ -204,6 +204,7 @@ function StudyApp() {
     understanding: 70,
     memo: "",
   });
+  const [editingLogId, setEditingLogId] = useState<string | null>(null);
 
   const [questionForm, setQuestionForm] = useState({
     date: new Date().toISOString().slice(0, 10),
@@ -322,6 +323,44 @@ function StudyApp() {
     setLogForm({ ...logForm, material: "", memo: "" });
   };
 
+  const startEditLog = (log: StudyLog) => {
+    setEditingLogId(log.id);
+    setLogForm({
+      date: log.date,
+      category: log.category,
+      material: log.material,
+      minutes: log.minutes,
+      understanding: log.understanding,
+      memo: log.memo,
+    });
+    setActiveTab("log");
+  };
+
+  const saveLogEdit = () => {
+    if (!editingLogId) return;
+    if (!logForm.material.trim()) return alert("教材名を入力してください");
+    setLogs(logs.map((log) => log.id === editingLogId ? {
+      ...log,
+      ...logForm,
+      minutes: Number(logForm.minutes),
+      understanding: Number(logForm.understanding),
+    } : log));
+    setEditingLogId(null);
+    setLogForm({ ...logForm, material: "", memo: "", minutes: 60, understanding: 70 });
+  };
+
+  const cancelLogEdit = () => {
+    setEditingLogId(null);
+    setLogForm({
+      date: new Date().toISOString().slice(0, 10),
+      category: "IAM/Organizations",
+      material: "",
+      minutes: 60,
+      understanding: 70,
+      memo: "",
+    });
+  };
+
   const applyTimerToLog = () => {
     const minutes = Math.max(1, Math.round(timerSeconds / 60));
     setLogForm({ ...logForm, minutes });
@@ -406,9 +445,9 @@ function StudyApp() {
               <Flame className="h-4 w-4" /> Portfolio App
             </div>
             <h2 className="max-w-3xl text-4xl font-black leading-tight tracking-tight md:text-5xl">
-              合格まで
-              <span className="bg-gradient-to-r from-violet-400 via-fuchsia-400 to-cyan-300 bg-clip-text text-transparent"> 導く </span>
-              学習アプリ
+              合格までの不足分を
+              <span className="bg-gradient-to-r from-violet-400 via-fuchsia-400 to-cyan-300 bg-clip-text text-transparent"> 見える化 </span>
+              する学習アプリ
             </h2>
             <p className="mt-4 max-w-2xl text-slate-300">
               タイマーで学習時間を記録し、理解度・誤答理由・復習予定から、次にやるべき学習を提示します。
@@ -553,14 +592,25 @@ function StudyApp() {
                 </div>
                 <Textarea className={inputClass} placeholder="メモ" value={logForm.memo} onChange={(e) => setLogForm({ ...logForm, memo: e.target.value })} />
                 <div className="grid grid-cols-2 gap-3">
-                  <Button className="rounded-2xl bg-gradient-to-r from-violet-500 to-cyan-500" onClick={addLog}><Plus className="mr-2 h-4 w-4" />手入力で追加</Button>
-                  <Button className="rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400" onClick={addTimerLog}><Timer className="mr-2 h-4 w-4" />タイマーで追加</Button>
+                  <Button className="rounded-2xl bg-gradient-to-r from-violet-500 to-cyan-500" onClick={editingLogId ? saveLogEdit : addLog}>
+                    <Plus className="mr-2 h-4 w-4" />{editingLogId ? "編集を保存" : "手入力で追加"}
+                  </Button>
+                  <Button className="rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400" onClick={addTimerLog} disabled={!!editingLogId}>
+                    <Timer className="mr-2 h-4 w-4" />タイマーで追加
+                  </Button>
+                </div>
+                {editingLogId && (
+                  <Button variant="outline" className="w-full rounded-2xl border-white/20 bg-white/5 text-white hover:bg-white/10" onClick={cancelLogEdit}>
+                    編集をキャンセル
+                  </Button>
+                )}
+                <div className="hidden"
                 </div>
               </div>
             </GlassCard>
 
             <div className="lg:col-span-2">
-              <ListCard title="学習ログ" items={logs} type="log" onDelete={removeLog} />
+              <ListCard title="学習ログ" items={logs} type="log" onDelete={removeLog} onEdit={startEditLog} />
             </div>
           </TabsContent>
 
@@ -666,7 +716,7 @@ function CategorySelect({ value, onChange }: { value: string; onChange: (value: 
   );
 }
 
-function ListCard({ title, items, type, onDelete }: { title: string; items: Array<StudyLog | QuestionLog>; type: "log" | "question"; onDelete: (id: string) => void }) {
+function ListCard({ title, items, type, onDelete, onEdit }: { title: string; items: Array<StudyLog | QuestionLog>; type: "log" | "question"; onDelete: (id: string) => void; onEdit?: (log: StudyLog) => void }) {
   return (
     <GlassCard>
       <h2 className="text-xl font-bold">{title}</h2>
@@ -684,9 +734,16 @@ function ListCard({ title, items, type, onDelete }: { title: string; items: Arra
                 {type === "question" && <p className="text-sm text-slate-400">復習日: {(item as QuestionLog).reviewDate}</p>}
                 <p className="mt-2 whitespace-pre-wrap text-sm text-slate-300">{item.memo}</p>
               </div>
-              <Button variant="ghost" size="icon" className="text-slate-300 hover:bg-white/10 hover:text-white" onClick={() => onDelete(item.id)}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
+              <div className="flex shrink-0 gap-2">
+                {type === "log" && onEdit && (
+                  <Button variant="outline" size="sm" className="rounded-xl border-white/20 bg-white/5 text-white hover:bg-white/10" onClick={() => onEdit(item as StudyLog)}>
+                    編集
+                  </Button>
+                )}
+                <Button variant="ghost" size="icon" className="text-slate-300 hover:bg-white/10 hover:text-white" onClick={() => onDelete(item.id)}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </div>
         ))}
